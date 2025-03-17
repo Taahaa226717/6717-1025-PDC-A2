@@ -1,0 +1,57 @@
+Task System Implementation Documentation (Part A)
+General Description
+
+The task system for Part A is designed to execute synchronous bulk task launches efficiently by leveraging multi-core processors for parallel execution. Three distinct implementations are provided, each improving upon the previous:
+
+    TaskSystemParallelSpawn: A basic parallel system that spawns new threads for each bulk task launch (run() call) and joins them before returning. It is straightforward but incurs significant overhead from thread creation.
+    TaskSystemParallelThreadPoolSpinning: A thread pool-based system where a fixed number of threads are created at initialization and reused across launches. Idle threads spin while waiting for tasks, reducing creation overhead.
+    TaskSystemParallelThreadPoolSleeping: An optimized thread pool system where idle threads sleep using condition variables, minimizing CPU usage and enhancing efficiency over spinning.
+
+Each version progressively reduces overhead and improves resource utilization for parallel task execution.
+Thread Management
+
+Thread management strategies differ across the implementations:
+
+    TaskSystemParallelSpawn:
+        Threads are created each time run() is called and destroyed after tasks complete.
+        This approach is simple but inefficient due to the high cost of thread creation and destruction, especially for frequent launches.
+    TaskSystemParallelThreadPoolSpinning:
+        A fixed thread pool is initialized (typically matching CPU core count) and persists throughout the system's lifetime.
+        Reusing threads eliminates repeated creation overhead, improving performance.
+    TaskSystemParallelThreadPoolSleeping:
+        Uses a thread pool like the spinning version, but idle threads sleep via condition variables instead of spinning.
+        This reduces CPU consumption during idle periods, enhancing efficiency.
+
+The thread pool approach in the latter two versions minimizes overhead and scales better for repeated task launches compared to the spawn-based system.
+Task Assignment
+
+Task distribution strategies vary as follows:
+
+    TaskSystemParallelSpawn:
+        Employs static assignment, where each thread receives a contiguous range of task IDs at launch.
+        Ensures even distribution but lacks flexibility for tasks with varying complexity.
+    TaskSystemParallelThreadPoolSpinning:
+        Uses dynamic assignment with an atomic counter (next_task_id).
+        Worker threads fetch and increment the counter to claim tasks, enabling load balancing as threads take work as they become available.
+    TaskSystemParallelThreadPoolSleeping:
+        Also uses dynamic assignment, but the counter is protected by a mutex to coordinate sleeping threads.
+        Ensures thread-safe task distribution while maintaining efficiency.
+
+Dynamic assignment in the thread pool versions adapts better to uneven workloads compared to the static approach in the spawn version.
+Performance Observations (Part A)
+
+Performance varies based on task characteristics:
+
+    Serial Implementation:
+        Outperforms parallel versions for extremely lightweight tasks (e.g., super_super_light test).
+        Thread creation or synchronization overhead exceeds parallelism benefits, making serial execution faster.
+    Spawn-Every-Launch Implementation:
+        Excels with computationally expensive tasks, where thread creation overhead is amortized over longer execution times.
+        Struggles with lightweight tasks due to dominant creation costs.
+    Thread Pool Implementations:
+        Shine in frequent launches or lightweight task scenarios.
+        The spinning version reduces creation overhead, while the sleeping version further optimizes by lowering CPU usage during idle periods, making it ideal for sustained workloads.
+
+The sequential system is best for minimal or low-complexity tasks, spawn-every-launch competes with thread pools for heavy tasks, and thread pools dominate in most practical cases due to their efficiency.
+
+
