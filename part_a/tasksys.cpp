@@ -9,43 +9,54 @@
 #include <unordered_map>
 #include <memory>
 #include <chrono>
-#include <stdio.h>
 
+// Provide definitions for IRunnable and ITaskSystem virtual functions
 IRunnable::~IRunnable() {}
 
 ITaskSystem::ITaskSystem(int num_threads) {}
+
 ITaskSystem::~ITaskSystem() {}
 
 /*
+ * ================================================================
  * Serial Task System Implementation
+ * ================================================================
  */
-const char* TaskSystemSerial::name() { return "Serial"; }
 TaskSystemSerial::TaskSystemSerial(int num_threads) : ITaskSystem(num_threads) {}
+
 TaskSystemSerial::~TaskSystemSerial() {}
+
+const char* TaskSystemSerial::name() { return "Serial"; }
+
 void TaskSystemSerial::run(IRunnable* runnable, int num_total_tasks) {
-    if (num_total_tasks <= 0) return;
-    
+    if (num_total_tasks <= 0 || runnable == nullptr) return;
     for (int i = 0; i < num_total_tasks; i++) {
         runnable->runTask(i, num_total_tasks);
     }
 }
+
 TaskID TaskSystemSerial::runAsyncWithDeps(IRunnable* runnable, int num_total_tasks,
-                                         const std::vector<TaskID>& deps) { 
+                                         const std::vector<TaskID>& deps) {
     run(runnable, num_total_tasks);
-    return 0; 
+    return 0; // Serial system doesn't track task IDs
 }
-void TaskSystemSerial::sync() { return; }
+
+void TaskSystemSerial::sync() {}
 
 /*
+ * ================================================================
  * Parallel Task System Implementation: Spawn Threads
+ * ================================================================
  */
-const char* TaskSystemParallelSpawn::name() { return "Parallel + Always Spawn"; }
 TaskSystemParallelSpawn::TaskSystemParallelSpawn(int num_threads)
     : ITaskSystem(num_threads), num_threads(num_threads) {}
+
 TaskSystemParallelSpawn::~TaskSystemParallelSpawn() {}
+
+const char* TaskSystemParallelSpawn::name() { return "Parallel + Always Spawn"; }
+
 void TaskSystemParallelSpawn::run(IRunnable* runnable, int num_total_tasks) {
-    if (num_total_tasks <= 0) return;
-    
+    if (num_total_tasks <= 0 || runnable == nullptr) return;
     int threads_to_use = std::min(num_threads, num_total_tasks);
     if (threads_to_use <= 0) return;
 
@@ -66,21 +77,23 @@ void TaskSystemParallelSpawn::run(IRunnable* runnable, int num_total_tasks) {
         thread.join();
     }
 }
+
 TaskID TaskSystemParallelSpawn::runAsyncWithDeps(IRunnable* runnable, int num_total_tasks,
-                                                const std::vector<TaskID>& deps) { 
+                                                const std::vector<TaskID>& deps) {
     run(runnable, num_total_tasks);
-    return 0; 
+    return 0; // No async support in this implementation
 }
-void TaskSystemParallelSpawn::sync() { return; }
+
+void TaskSystemParallelSpawn::sync() {}
 
 /*
+ * ================================================================
  * Parallel Thread Pool Spinning Task System Implementation
+ * ================================================================
  */
-const char* TaskSystemParallelThreadPoolSpinning::name() { return "Parallel + Thread Pool + Spin"; }
 TaskSystemParallelThreadPoolSpinning::TaskSystemParallelThreadPoolSpinning(int num_threads)
     : ITaskSystem(num_threads), num_threads(num_threads), shutdown(false),
       current_runnable(nullptr), num_total_tasks(0), next_task_id(0), completed_tasks(0) {
-    
     threads.reserve(num_threads);
     for (int i = 0; i < num_threads; i++) {
         threads.emplace_back(&TaskSystemParallelThreadPoolSpinning::worker, this);
@@ -94,23 +107,18 @@ TaskSystemParallelThreadPoolSpinning::~TaskSystemParallelThreadPoolSpinning() {
     }
 }
 
-void TaskSystemParallelThreadPoolSpinning::run(IRunnable* runnable, int num_total_tasks) {
-    if (num_total_tasks <= 0) return;
+const char* TaskSystemParallelThreadPoolSpinning::name() { return "Parallel + Thread Pool + Spin"; }
 
-    // Reset counters
+void TaskSystemParallelThreadPoolSpinning::run(IRunnable* runnable, int num_total_tasks) {
+    if (num_total_tasks <= 0 || runnable == nullptr) return;
     next_task_id.store(0);
     completed_tasks.store(0);
-    
-    // Set up the task
-    current_runnable.store(runnable);
     this->num_total_tasks.store(num_total_tasks);
+    current_runnable.store(runnable);
 
-    // Wait for all tasks to complete
     while (completed_tasks.load() < num_total_tasks) {
-        // Adding a small sleep to reduce CPU usage from constant spinning
         std::this_thread::sleep_for(std::chrono::microseconds(10));
     }
-
     current_runnable.store(nullptr);
 }
 
@@ -125,27 +133,26 @@ void TaskSystemParallelThreadPoolSpinning::worker() {
                 completed_tasks.fetch_add(1);
             }
         } else {
-            // Sleep briefly to reduce CPU usage when idle
             std::this_thread::sleep_for(std::chrono::microseconds(100));
         }
     }
 }
 
 TaskID TaskSystemParallelThreadPoolSpinning::runAsyncWithDeps(IRunnable* runnable, int num_total_tasks,
-                                                             const std::vector<TaskID>& deps) { 
+                                                             const std::vector<TaskID>& deps) {
     run(runnable, num_total_tasks);
-    return 0; 
+    return 0; // No async support in this implementation
 }
 
-void TaskSystemParallelThreadPoolSpinning::sync() { return; }
+void TaskSystemParallelThreadPoolSpinning::sync() {}
 
 /*
+ * ================================================================
  * Parallel Thread Pool Sleeping Task System Implementation
+ * ================================================================
  */
-const char* TaskSystemParallelThreadPoolSleeping::name() { return "Parallel + Thread Pool + Sleep"; }
 TaskSystemParallelThreadPoolSleeping::TaskSystemParallelThreadPoolSleeping(int num_threads)
     : ITaskSystem(num_threads), num_threads(num_threads), shutdown(false), tasks_in_flight(0) {
-    
     threads.reserve(num_threads);
     for (int i = 0; i < num_threads; i++) {
         threads.emplace_back(&TaskSystemParallelThreadPoolSleeping::worker, this);
@@ -158,32 +165,22 @@ TaskSystemParallelThreadPoolSleeping::~TaskSystemParallelThreadPoolSleeping() {
         shutdown = true;
     }
     cv_work.notify_all();
-    
     for (auto& thread : threads) {
         thread.join();
     }
 }
 
-void TaskSystemParallelThreadPoolSleeping::run(IRunnable* runnable, int num_total_tasks) {
-    if (num_total_tasks <= 0) return;
+const char* TaskSystemParallelThreadPoolSleeping::name() { return "Parallel + Thread Pool + Sleep"; }
 
+void TaskSystemParallelThreadPoolSleeping::run(IRunnable* runnable, int num_total_tasks) {
+    if (num_total_tasks <= 0 || runnable == nullptr) return;
     {
         std::unique_lock<std::mutex> lock(mutex);
-        
-        // Add all tasks to the queue
         for (int i = 0; i < num_total_tasks; i++) {
             task_queue.emplace(runnable, num_total_tasks, i);
         }
-        
         tasks_in_flight = num_total_tasks;
-    }
-    
-    // Wake up worker threads
-    cv_work.notify_all();
-    
-    // Wait for all tasks to complete
-    {
-        std::unique_lock<std::mutex> lock(mutex);
+        cv_work.notify_all();
         cv_done.wait(lock, [this]() { return tasks_in_flight == 0; });
     }
 }
@@ -192,32 +189,23 @@ void TaskSystemParallelThreadPoolSleeping::worker() {
     while (true) {
         Task task(nullptr, 0, 0);
         bool have_task = false;
-        
         {
             std::unique_lock<std::mutex> lock(mutex);
-            
-            // Wait until there's work or we're shutting down
             cv_work.wait(lock, [this]() { return !task_queue.empty() || shutdown; });
-            
             if (shutdown && task_queue.empty()) {
                 return;
             }
-            
             if (!task_queue.empty()) {
                 task = task_queue.front();
                 task_queue.pop();
                 have_task = true;
             }
         }
-        
-        // Execute task if we got one
         if (have_task) {
             task.runnable->runTask(task.task_id, task.num_total_tasks);
-            
             {
                 std::lock_guard<std::mutex> lock(mutex);
                 tasks_in_flight--;
-                
                 if (tasks_in_flight == 0) {
                     cv_done.notify_all();
                 }
@@ -229,18 +217,18 @@ void TaskSystemParallelThreadPoolSleeping::worker() {
 TaskID TaskSystemParallelThreadPoolSleeping::runAsyncWithDeps(IRunnable* runnable, int num_total_tasks,
                                                             const std::vector<TaskID>& deps) {
     run(runnable, num_total_tasks);
-    return 0;
+    return 0; // No async support in this implementation
 }
 
-void TaskSystemParallelThreadPoolSleeping::sync() { return; }
+void TaskSystemParallelThreadPoolSleeping::sync() {}
 
 /*
+ * ================================================================
  * Parallel Thread Pool Sleeping with Dependencies Task System Implementation
+ * ================================================================
  */
-const char* TaskSystemParallelThreadPoolSleepingDeps::name() { return "Parallel + Thread Pool + Sleep + Deps"; }
 TaskSystemParallelThreadPoolSleepingDeps::TaskSystemParallelThreadPoolSleepingDeps(int num_threads)
     : ITaskSystem(num_threads), num_threads(num_threads), shutdown(false), next_task_set_id(1) {
-    
     threads.reserve(num_threads);
     for (int i = 0; i < num_threads; i++) {
         threads.emplace_back(&TaskSystemParallelThreadPoolSleepingDeps::worker, this);
@@ -253,175 +241,90 @@ TaskSystemParallelThreadPoolSleepingDeps::~TaskSystemParallelThreadPoolSleepingD
         shutdown = true;
     }
     cv_work.notify_all();
-    
     for (auto& thread : threads) {
         thread.join();
     }
 }
 
+const char* TaskSystemParallelThreadPoolSleepingDeps::name() { return "Parallel + Thread Pool + Sleep + Deps"; }
+
 void TaskSystemParallelThreadPoolSleepingDeps::run(IRunnable* runnable, int num_total_tasks) {
-    if (num_total_tasks <= 0) return;
-    
+    if (num_total_tasks <= 0 || runnable == nullptr) return;
     std::vector<TaskID> no_deps;
-    TaskID id = runAsyncWithDeps(runnable, num_total_tasks, no_deps);
-    
-    // Wait for this specific task set to complete
-    {
-        std::unique_lock<std::mutex> lock(mutex);
-        auto it = task_sets.find(id);
-        if (it != task_sets.end()) {
-            auto task_set = it->second;
-            cv_done.wait(lock, [task_set, num_total_tasks]() { 
-                return task_set->tasks_completed.load() == num_total_tasks; 
-            });
-            task_sets.erase(id);
-        }
-    }
+    runAsyncWithDeps(runnable, num_total_tasks, no_deps);
+    sync();
 }
 
 TaskID TaskSystemParallelThreadPoolSleepingDeps::runAsyncWithDeps(IRunnable* runnable, int num_total_tasks,
                                                                 const std::vector<TaskID>& deps) {
-    if (num_total_tasks <= 0) return 0;
-    
+    if (num_total_tasks <= 0 || runnable == nullptr) return 0;
     TaskID new_id;
     {
         std::lock_guard<std::mutex> lock(mutex);
         new_id = next_task_set_id++;
-        
-        // Create a new task set
-        auto task_set = std::make_shared<TaskSet>(runnable, num_total_tasks, deps);
-        task_sets[new_id] = task_set;
-        
-        // If all dependencies are satisfied, add to ready queue
+        task_sets[new_id] = std::make_shared<TaskSet>(runnable, num_total_tasks, deps);
         if (areAllDependenciesComplete(deps)) {
-            ready_queue.push(new_id);
+            for (int i = 0; i < num_total_tasks; i++) {
+                task_queue.emplace(runnable, num_total_tasks, i, new_id);
+            }
             cv_work.notify_all();
         }
     }
-    
     return new_id;
 }
 
 void TaskSystemParallelThreadPoolSleepingDeps::sync() {
     std::unique_lock<std::mutex> lock(mutex);
-    cv_done.wait(lock, [this]() { 
-        return task_sets.empty() || 
-               std::all_of(task_sets.begin(), task_sets.end(), 
-                           [](const std::pair<const int, std::shared_ptr<TaskSet>>& pair) { 
-                               return pair.second->tasks_completed.load() == pair.second->num_total_tasks; 
-                           });
-    });
-    
-    // Clear completed task sets
-    for (auto it = task_sets.begin(); it != task_sets.end();) {
-        if (it->second->tasks_completed.load() == it->second->num_total_tasks) {
-            it = task_sets.erase(it);
-        } else {
-            ++it;
-        }
-    }
+    cv_done.wait(lock, [this]() { return task_sets.empty(); });
 }
 
 void TaskSystemParallelThreadPoolSleepingDeps::worker() {
     while (true) {
-        TaskID current_task_id = 0;
-        std::shared_ptr<TaskSet> current_task_set;
-        bool have_task = false;
-        
+        Task task(nullptr, 0, 0, 0);
         {
             std::unique_lock<std::mutex> lock(mutex);
-            
-            // Wait for work or shutdown
-            cv_work.wait(lock, [this]() { return !ready_queue.empty() || shutdown; });
-            
-            if (shutdown && ready_queue.empty()) {
+            cv_work.wait(lock, [this]() { return !task_queue.empty() || shutdown; });
+            if (shutdown && task_queue.empty()) {
                 return;
             }
-            
-            if (!ready_queue.empty()) {
-                current_task_id = ready_queue.front();
-                ready_queue.pop();
-                
-                auto it = task_sets.find(current_task_id);
-                if (it != task_sets.end()) {
-                    current_task_set = it->second;
-                    have_task = true;
-                }
+            if (!task_queue.empty()) {
+                task = task_queue.front();
+                task_queue.pop();
             }
         }
-        
-        if (have_task) {
-            // Get task ID within the task set
-            int task_id = current_task_set->next_task_id.fetch_add(1);
-            
-            // Execute if this task ID is within range
-            if (task_id < current_task_set->num_total_tasks) {
-                current_task_set->runnable->runTask(task_id, current_task_set->num_total_tasks);
-                
-                // Mark task as completed
-                int tasks_completed = current_task_set->tasks_completed.fetch_add(1) + 1;
-                
-                // If there are more tasks in this set, put the task set back in the queue
-                if (tasks_completed < current_task_set->num_total_tasks) {
-                    std::lock_guard<std::mutex> lock(mutex);
-                    ready_queue.push(current_task_id);
-                    cv_work.notify_one();
-                } 
-                // If this task set is complete, check if it was a dependency for other tasks
-                else {
-                    std::lock_guard<std::mutex> lock(mutex);
-                    checkAndEnqueueReadyTasks();
-                    cv_done.notify_all();
-                }
-            } 
-            // If we got a task ID out of range, put the task set back in case other threads need work
-            else {
+        if (task.runnable) {
+            task.runnable->runTask(task.task_id, task.num_total_tasks);
+            {
                 std::lock_guard<std::mutex> lock(mutex);
-                if (current_task_set->tasks_completed.load() < current_task_set->num_total_tasks) {
-                    ready_queue.push(current_task_id);
-                    cv_work.notify_one();
+                auto& task_set = *task_sets[task.task_set_id];
+                task_set.remaining_tasks--;
+                if (task_set.remaining_tasks == 0) {
+                    for (TaskID dependent_id : task_set.dependents) {
+                        if (areAllDependenciesComplete(task_sets[dependent_id]->dependencies)) {
+                            for (int i = 0; i < task_sets[dependent_id]->num_total_tasks; i++) {
+                                task_queue.emplace(task_sets[dependent_id]->runnable,
+                                                  task_sets[dependent_id]->num_total_tasks,
+                                                  i, dependent_id);
+                            }
+                        }
+                    }
+                    task_sets.erase(task.task_set_id);
+                    if (task_sets.empty()) {
+                        cv_done.notify_all();
+                    }
                 }
+                cv_work.notify_all();
             }
-        }
-    }
-}
-
-void TaskSystemParallelThreadPoolSleepingDeps::checkAndEnqueueReadyTasks() {
-    // Check all task sets to see if their dependencies are now satisfied
-    for (const auto& pair : task_sets) {
-        TaskID id = pair.first;
-        const auto& task_set = pair.second;
-        
-        // Skip task sets that are already in the queue or completed
-        if (task_set->tasks_completed.load() == task_set->num_total_tasks || 
-            task_set->next_task_id.load() > 0) {
-            continue;
-        }
-        
-        // Check if all dependencies are now satisfied
-        if (areAllDependenciesComplete(task_set->deps)) {
-            ready_queue.push(id);
-            cv_work.notify_one();
         }
     }
 }
 
 bool TaskSystemParallelThreadPoolSleepingDeps::areAllDependenciesComplete(const std::vector<TaskID>& deps) {
-    if (deps.empty()) {
-        return true;
-    }
-    
     for (TaskID dep_id : deps) {
         auto it = task_sets.find(dep_id);
-        if (it == task_sets.end()) {
-            continue; // Dependency doesn't exist (might have been removed after completion)
-        }
-        
-        const auto& dep_task_set = it->second;
-        if (dep_task_set->tasks_completed.load() < dep_task_set->num_total_tasks) {
-            return false; // Found an incomplete dependency
+        if (it != task_sets.end() && it->second->remaining_tasks > 0) {
+            return false;
         }
     }
-    
     return true;
 }
