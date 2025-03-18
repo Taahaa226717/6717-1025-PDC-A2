@@ -2,11 +2,12 @@
 #define _TASKSYS_H
 
 #include "itasksys.h"
-#include <condition_variable>
 #include <atomic>
 #include <thread>
-#include <deque>
 #include <mutex>
+#include <condition_variable>
+#include <deque>
+#include <vector>
 
 /*
  * TaskSystemSerial: This class is the student's implementation of a
@@ -43,33 +44,10 @@ public:
     void sync();
 
 private:
-    void threadTask(IRunnable *runnable, int num_total_tasks);
-    int num_threads_;
-    std::atomic<int> my_counter_;
+    void workerFunction(IRunnable *runnable, int num_total_tasks, std::atomic<int> *next_task_idx);
+    int thread_count;
 };
 
-struct threadArg
-{
-    int task_id;
-    int num_total_tasks;
-    IRunnable *runnable = nullptr;
-
-    threadArg()
-    {
-    }
-    threadArg(const threadArg &arg)
-    {
-        task_id = arg.task_id;
-        num_total_tasks = arg.num_total_tasks;
-        runnable = arg.runnable;
-    }
-    threadArg(int id, int total_task, IRunnable *run)
-    {
-        task_id = id;
-        num_total_tasks = total_task;
-        runnable = run;
-    }
-};
 /*
  * TaskSystemParallelThreadPoolSpinning: This class is the student's
  * implementation of a parallel task execution engine that uses a
@@ -88,13 +66,21 @@ public:
     void sync();
 
 private:
-    void threadTask();
-    std::vector<std::thread> workers_;
-    int num_threads_;
-    std::atomic<bool> done_;
-    std::mutex mutex_;
-    std::deque<threadArg> task_queue_;
-    std::atomic<int> finished_tasks_;
+    struct TaskInfo
+    {
+        IRunnable *runnable;
+        int task_id;
+        int num_total_tasks;
+    };
+
+    void workerLoop();
+
+    int thread_count;
+    std::vector<std::thread> thread_pool;
+    std::deque<TaskInfo> task_queue;
+    std::mutex queue_mutex;
+    std::atomic<bool> should_terminate;
+    std::atomic<int> tasks_completed;
 };
 
 /*
@@ -115,14 +101,24 @@ public:
     void sync();
 
 private:
-    void threadTask();
-    std::vector<std::thread> workers_;
-    int num_threads_;
-    std::atomic<bool> done_;
-    std::mutex mutex_;
-    std::condition_variable cv_;
-    std::deque<threadArg> task_queue_;
-    std::atomic<int> finished_tasks_;
+    struct TaskInfo
+    {
+        IRunnable *runnable;
+        int task_id;
+        int num_total_tasks;
+    };
+
+    void workerLoop();
+
+    int thread_count;
+    std::vector<std::thread> thread_pool;
+    std::deque<TaskInfo> task_queue;
+    std::mutex queue_mutex;
+    std::atomic<bool> should_terminate;
+    std::atomic<int> tasks_completed;
+    int total_tasks_in_bulk_launch;
+    std::condition_variable work_cv;       // For workers waiting for tasks
+    std::condition_variable completion_cv; // For main thread waiting for completion
 };
 
 #endif
